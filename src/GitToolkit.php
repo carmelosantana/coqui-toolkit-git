@@ -1,0 +1,124 @@
+<?php
+
+declare(strict_types=1);
+
+namespace CoquiBot\Toolkits\Git;
+
+use CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use CoquiBot\Toolkits\Git\Runtime\GitRunner;
+use CoquiBot\Toolkits\Git\Tool\GitBranchTool;
+use CoquiBot\Toolkits\Git\Tool\GitCheckoutTool;
+use CoquiBot\Toolkits\Git\Tool\GitCommitTool;
+use CoquiBot\Toolkits\Git\Tool\GitDiffTool;
+use CoquiBot\Toolkits\Git\Tool\GitInitTool;
+use CoquiBot\Toolkits\Git\Tool\GitLogTool;
+use CoquiBot\Toolkits\Git\Tool\GitMergeTool;
+use CoquiBot\Toolkits\Git\Tool\GitPullTool;
+use CoquiBot\Toolkits\Git\Tool\GitPushTool;
+use CoquiBot\Toolkits\Git\Tool\GitRemoteTool;
+use CoquiBot\Toolkits\Git\Tool\GitStageTool;
+use CoquiBot\Toolkits\Git\Tool\GitStatusTool;
+use CoquiBot\Toolkits\Git\Tool\GitTagTool;
+
+/**
+ * Git repository management toolkit for Coqui.
+ *
+ * Provides full Git CLI access — status, staging, commits, branches,
+ * tags, remotes, push/pull, merge, diff, and log. All operations
+ * accept an optional repo path parameter, defaulting to the current
+ * working directory.
+ *
+ * Auto-discovered by Coqui's ToolkitDiscovery when installed via Composer.
+ */
+final class GitToolkit implements ToolkitInterface
+{
+    public function __construct(
+        private readonly string $workspacePath = '',
+    ) {}
+
+    /**
+     * Factory method for ToolkitDiscovery — reads workspace path from environment.
+     */
+    public static function fromEnv(): self
+    {
+        $workspacePath = getenv('COQUI_WORKSPACE_PATH');
+
+        return new self(
+            workspacePath: is_string($workspacePath) && $workspacePath !== '' ? $workspacePath : '',
+        );
+    }
+
+    public function tools(): array
+    {
+        $runner = new GitRunner(defaultRepoPath: $this->workspacePath);
+
+        return [
+            (new GitInitTool($runner))->build(),
+            (new GitStatusTool($runner))->build(),
+            (new GitStageTool($runner))->build(),
+            (new GitCommitTool($runner))->build(),
+            (new GitDiffTool($runner))->build(),
+            (new GitLogTool($runner))->build(),
+            (new GitBranchTool($runner))->build(),
+            (new GitCheckoutTool($runner))->build(),
+            (new GitTagTool($runner))->build(),
+            (new GitRemoteTool($runner))->build(),
+            (new GitPushTool($runner))->build(),
+            (new GitPullTool($runner))->build(),
+            (new GitMergeTool($runner))->build(),
+        ];
+    }
+
+    public function guidelines(): string
+    {
+        return <<<'GUIDELINES'
+            <GIT-TOOLKIT-GUIDELINES>
+            ## Tool Selection
+
+            | Task | Tool | Notes |
+            |------|------|-------|
+            | Check repo state | `git_status` | Always check status before committing |
+            | Stage files | `git_stage` | action: add, add_all, reset |
+            | Create commit | `git_commit` | Requires staged changes (or use all=true) |
+            | View changes | `git_diff` | scope: working, staged, commits |
+            | View history | `git_log` | Filter by author, date, file, message |
+            | Manage branches | `git_branch` | action: list, create, delete, rename, current |
+            | Switch branch | `git_checkout` | Also restores files from commits |
+            | Manage tags | `git_tag` | action: list, create, delete |
+            | Manage remotes | `git_remote` | action: list, add, remove, show |
+            | Push to remote | `git_push` | Sends local commits upstream |
+            | Pull from remote | `git_pull` | Fetches and integrates remote changes |
+            | Merge branches | `git_merge` | Merge or abort in-progress merge |
+
+            ## Workflow Patterns
+
+            ### Feature Branch Flow
+            1. `git_branch(action: "create", name: "feature/my-change")`
+            2. `git_checkout(target: "feature/my-change")`
+            3. Make changes...
+            4. `git_stage(action: "add_all")`
+            5. `git_commit(message: "feat: implement my change")`
+            6. `git_push(branch: "feature/my-change", set_upstream: true)`
+
+            ### Quick Commit Flow
+            1. `git_status()` — check what changed
+            2. `git_diff(scope: "working")` — review changes
+            3. `git_stage(action: "add", files: "src/Foo.php src/Bar.php")`
+            4. `git_commit(message: "fix: resolve null handling in Foo")`
+
+            ### Review Changes
+            1. `git_log(count: 5, oneline: true)` — recent history
+            2. `git_diff(scope: "commits", ref1: "HEAD~3")` — last 3 commits' changes
+            3. `git_diff(scope: "commits", ref1: "main", ref2: "feature/x")` — branch comparison
+
+            ## Best Practices
+            - Always check `git_status` before staging or committing
+            - Use `git_diff(scope: "staged")` to review exactly what will be committed
+            - Write clear, conventional commit messages (feat:, fix:, docs:, refactor:, test:, chore:)
+            - Every tool accepts an optional `path` parameter to operate on any repo
+            - Use `git_branch(action: "current")` to verify the active branch
+            - Use `git_push(set_upstream: true)` on first push of a new branch
+            </GIT-TOOLKIT-GUIDELINES>
+            GUIDELINES;
+    }
+}
