@@ -10,6 +10,12 @@ namespace CoquiBot\Toolkits\Git\Runtime;
  * Resolves the git binary, builds commands with proper argument escaping,
  * and executes via proc_open() with non-blocking output reads, timeout
  * support, and output truncation.
+ *
+ * When GIT_BOT_NAME / GIT_BOT_EMAIL environment variables are configured
+ * (via the Coqui credential system), they are automatically injected as
+ * GIT_AUTHOR_NAME, GIT_COMMITTER_NAME, GIT_AUTHOR_EMAIL, and
+ * GIT_COMMITTER_EMAIL into every git process. This enables a separate
+ * bot identity for commits without modifying the repo's git config.
  */
 final class GitRunner
 {
@@ -108,7 +114,9 @@ final class GitRunner
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($command, $descriptors, $pipes, $cwd);
+        $env = $this->buildEnvironment();
+
+        $process = proc_open($command, $descriptors, $pipes, $cwd, $env);
 
         if (!is_resource($process)) {
             return new GitResult(1, '', 'Failed to start process: ' . $command);
@@ -178,5 +186,50 @@ final class GitRunner
 
         return substr($output, 0, self::MAX_OUTPUT_BYTES)
             . "\n\n[Output truncated at " . self::MAX_OUTPUT_BYTES . ' bytes]';
+    }
+
+    /**
+     * Build the environment array for proc_open.
+     *
+     * Inherits the current process environment and overlays bot identity
+     * vars when GIT_BOT_NAME / GIT_BOT_EMAIL are configured via the
+     * Coqui credential system (or set in the process environment directly).
+     *
+     * @return array<string, string>|null Null inherits parent env (when no overrides needed)
+     */
+    private function buildEnvironment(): ?array
+    {
+        $botName = $this->resolveEnv('GIT_BOT_NAME');
+        $botEmail = $this->resolveEnv('GIT_BOT_EMAIL');
+
+        if ($botName === '' && $botEmail === '') {
+            return null; // No overrides — inherit parent environment
+        }
+
+        // Start with current environment
+        /** @var array<string, string> $env */
+        $env = getenv();
+
+        if ($botName !== '') {
+            $env['GIT_AUTHOR_NAME'] = $botName;
+            $env['GIT_COMMITTER_NAME'] = $botName;
+        }
+
+        if ($botEmail !== '') {
+            $env['GIT_AUTHOR_EMAIL'] = $botEmail;
+            $env['GIT_COMMITTER_EMAIL'] = $botEmail;
+        }
+
+        return $env;
+    }
+
+    /**
+     * Lazily resolve an environment variable.
+     */
+    private function resolveEnv(string $name): string
+    {
+        $value = getenv($name);
+
+        return is_string($value) && $value !== '' ? $value : '';
     }
 }

@@ -49,7 +49,27 @@
             "toolkits": [
                 "CoquiBot\\Toolkits\\Git\\GitToolkit"
             ],
-            "description": "Git repository management — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log"
+            "description": "Git repository management — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log",
+            "credentials": {
+                "GIT_BOT_NAME": {
+                    "description": "Git author/committer name for bot commits (e.g. 'Coqui Bot'). Optional — omit to use the repo's default git config.",
+                    "optional": true
+                },
+                "GIT_BOT_EMAIL": {
+                    "description": "Git author/committer email for bot commits (e.g. 'bot@coqui.dev'). Optional — omit to use the repo's default git config.",
+                    "optional": true
+                }
+            },
+            "gated": {
+                "git_push": ["*"],
+                "git_pull": ["*"],
+                "git_merge": ["*"],
+                "git_branch": ["delete"],
+                "git_tag": ["delete"],
+                "git_remote": ["remove"],
+                "git_commit": [{"amend": true}],
+                "git_checkout": [{"files": "*"}]
+            }
         }
     },
     "minimum-stability": "dev",

@@ -90,6 +90,35 @@ final class GitToolkit implements ToolkitInterface
             | Pull from remote | `git_pull` | Fetches and integrates remote changes |
             | Merge branches | `git_merge` | Merge or abort in-progress merge |
 
+            ## Destructive Operation Confirmation
+
+            The following operations require user confirmation before executing
+            (unless `--auto-approve` is enabled):
+
+            | Operation | Trigger | Risk |
+            |-----------|---------|------|
+            | `git_push` | All invocations | Publishes commits to remote; force push rewrites history |
+            | `git_pull` | All invocations | Modifies local branch with remote changes |
+            | `git_merge` | All invocations | Modifies branch history; may cause conflicts |
+            | `git_branch` | `action: "delete"` | Deletes a branch (force delete loses unmerged work) |
+            | `git_tag` | `action: "delete"` | Removes a tag reference |
+            | `git_remote` | `action: "remove"` | Removes remote configuration |
+            | `git_commit` | `amend: true` | Rewrites the last commit (changes history) |
+            | `git_checkout` | `files` parameter set | Overwrites working tree files (uncommitted changes lost) |
+
+            When confirmation is triggered, the user sees the tool name and arguments
+            and must approve. If denied, the tool returns an error — inform the user
+            and ask if they'd like to proceed differently.
+
+            ## Bot Identity
+
+            When `GIT_BOT_NAME` and/or `GIT_BOT_EMAIL` credentials are configured,
+            all git commands automatically use them as the author/committer identity.
+            This enables a separate bot account for commits without modifying the
+            repo's git config.
+
+            To configure: `credentials(action: "set", key: "GIT_BOT_NAME", value: "Coqui Bot")`
+
             ## Workflow Patterns
 
             ### Feature Branch Flow
@@ -118,6 +147,7 @@ final class GitToolkit implements ToolkitInterface
             - Every tool accepts an optional `path` parameter to operate on any repo
             - Use `git_branch(action: "current")` to verify the active branch
             - Use `git_push(set_upstream: true)` on first push of a new branch
+            - Prefer `git_push(force: false)` unless the user explicitly asks for force push
             </GIT-TOOLKIT-GUIDELINES>
             GUIDELINES;
     }

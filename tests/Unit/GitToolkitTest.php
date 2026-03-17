@@ -70,6 +70,50 @@ test('guidelines returns non-empty string with XML tag', function () {
         ->toContain('</GIT-TOOLKIT-GUIDELINES>');
 });
 
+test('guidelines mention destructive operation confirmation', function () {
+    $toolkit = new GitToolkit();
+    $guidelines = $toolkit->guidelines();
+
+    expect($guidelines)
+        ->toContain('Destructive Operation Confirmation')
+        ->toContain('git_push')
+        ->toContain('git_merge')
+        ->toContain('git_branch')
+        ->toContain('action: "delete"');
+});
+
+test('guidelines mention bot identity', function () {
+    $toolkit = new GitToolkit();
+    $guidelines = $toolkit->guidelines();
+
+    expect($guidelines)
+        ->toContain('Bot Identity')
+        ->toContain('GIT_BOT_NAME')
+        ->toContain('GIT_BOT_EMAIL');
+});
+
+test('composer.json declares gated tools', function () {
+    $composerPath = dirname(__DIR__, 2) . '/composer.json';
+    $composer = json_decode(file_get_contents($composerPath), true);
+
+    $gated = $composer['extra']['php-agents']['gated'] ?? [];
+
+    expect($gated)->toBeArray()->not->toBeEmpty();
+    expect($gated)->toHaveKeys(['git_push', 'git_pull', 'git_merge', 'git_branch', 'git_tag', 'git_remote', 'git_commit', 'git_checkout']);
+});
+
+test('composer.json declares optional credentials', function () {
+    $composerPath = dirname(__DIR__, 2) . '/composer.json';
+    $composer = json_decode(file_get_contents($composerPath), true);
+
+    $credentials = $composer['extra']['php-agents']['credentials'] ?? [];
+
+    expect($credentials)->toBeArray()->not->toBeEmpty();
+    expect($credentials)->toHaveKeys(['GIT_BOT_NAME', 'GIT_BOT_EMAIL']);
+    expect($credentials['GIT_BOT_NAME']['optional'])->toBeTrue();
+    expect($credentials['GIT_BOT_EMAIL']['optional'])->toBeTrue();
+});
+
 test('fromEnv creates instance', function () {
     $toolkit = GitToolkit::fromEnv();
 
