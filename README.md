@@ -1,6 +1,6 @@
 # Coqui Git Toolkit
 
-Git repository management toolkit for [Coqui](https://github.com/AgentCoqui/coqui). Provides full Git CLI access — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, and log — all sandboxed through typed tools with proper argument escaping.
+Git repository management toolkit for [Coqui](https://github.com/AgentCoqui/coqui). Provides full Git CLI access plus repository triage analytics — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log, and pre-code-reading audit workflows — all sandboxed through typed tools with proper argument escaping.
 
 ## Requirements
 
@@ -15,6 +15,8 @@ composer require coquibot/coqui-toolkit-git
 ```
 
 When installed alongside Coqui, the toolkit is **auto-discovered** via Composer's `extra.php-agents.toolkits` — no manual registration needed.
+
+The toolkit also bundles a reusable skill, `git-repository-audit`, so Coqui can apply the discovery workflow automatically when the user asks to assess a repository before reading code.
 
 ## Tools Provided
 
@@ -171,6 +173,60 @@ Merge a branch into the current branch.
 | `abort` | bool | No | Abort an in-progress merge |
 | `path` | string | No | Repository path |
 
+## Repository Analysis Tools
+
+### `git_churn_hotspots`
+
+Rank the files that change most often in a selected time window.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `period` | enum | No | `1-month`, `3-months`, `6-months`, `1-year`, or `all-time` |
+| `limit` | int | No | Max files to show (default: 20, max: 50) |
+| `path` | string | No | Repository path |
+
+### `git_contributor_ranking`
+
+Rank contributors by commit count and flag bus-factor or maintainer drift.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `period` | enum | No | `all-time`, `1-year`, `6-months`, or `3-months` |
+| `merge_strategy` | enum | No | `ignore-merges` or `count-merges` |
+| `limit` | int | No | Max contributors to show (default: 20, max: 50) |
+| `path` | string | No | Repository path |
+
+### `git_bug_hotspots`
+
+Find files that repeatedly appear in bug-fix commits and cross-check them with churn hotspots.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `period` | enum | No | `1-month`, `3-months`, `6-months`, `1-year`, or `all-time` |
+| `keywords` | string | No | Regex used to match fix-heavy commit messages (default: `fix|bug|broken`) |
+| `limit` | int | No | Max files to show (default: 20, max: 50) |
+| `path` | string | No | Repository path |
+
+### `git_velocity_trend`
+
+Summarize commit activity over time.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `period` | enum | No | `1-year`, `2-years`, or `all-time` |
+| `granularity` | enum | No | `month`, `quarter`, or `year` |
+| `path` | string | No | Repository path |
+
+### `git_crisis_detection`
+
+Detect revert, hotfix, rollback, or emergency commit patterns that suggest firefighting.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `period` | enum | No | `1-month`, `3-months`, `6-months`, or `1-year` |
+| `keywords` | string | No | Regex used to match crisis-oriented commit messages (default: `revert|hotfix|emergency|rollback`) |
+| `path` | string | No | Repository path |
+
 ## Usage Examples
 
 ### Feature Branch Workflow
@@ -201,6 +257,18 @@ git_diff(scope: "commits", ref1: "HEAD~5")
 git_diff(scope: "commits", ref1: "main", ref2: "feature/x", stat_only: true)
 ```
 
+### Repository Triage Before Reading Code
+
+```
+git_churn_hotspots(period: "1-year")
+git_bug_hotspots(period: "1-year")
+git_contributor_ranking(period: "all-time")
+git_velocity_trend(period: "all-time", granularity: "month")
+git_crisis_detection(period: "1-year")
+```
+
+Use this flow to decide which files to inspect first, whether the codebase depends heavily on one maintainer, and whether the team is delivering confidently or firefighting.
+
 ### Tagging a Release
 
 ```
@@ -212,6 +280,8 @@ git_push(tags: true)
 
 ```
 src/
+├── Analysis/
+│   └── GitAnalysisService.php  # Shared parsing + formatting for repository triage tools
 ├── GitToolkit.php              # ToolkitInterface — registers all tools + guidelines
 ├── Runtime/
 │   ├── GitRunner.php           # proc_open wrapper with timeout + output truncation
@@ -230,6 +300,15 @@ src/
     ├── GitPushTool.php
     ├── GitPullTool.php
     └── GitMergeTool.php
+    ├── GitChurnHotspotsTool.php
+    ├── GitContributorRankingTool.php
+    ├── GitBugHotspotsTool.php
+    ├── GitVelocityTrendTool.php
+    └── GitCrisisDetectionTool.php
+
+skills/
+└── git-repository-audit/
+    └── SKILL.md                # Bundled repo-triage workflow guidance
 ```
 
 ## Development

@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace CoquiBot\Toolkits\Git;
 
 use CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use CoquiBot\Toolkits\Git\Analysis\GitAnalysisService;
 use CoquiBot\Toolkits\Git\Runtime\GitRunner;
 use CoquiBot\Toolkits\Git\Tool\GitBranchTool;
 use CoquiBot\Toolkits\Git\Tool\GitCheckoutTool;
 use CoquiBot\Toolkits\Git\Tool\GitCommitTool;
+use CoquiBot\Toolkits\Git\Tool\GitContributorRankingTool;
+use CoquiBot\Toolkits\Git\Tool\GitCrisisDetectionTool;
+use CoquiBot\Toolkits\Git\Tool\GitChurnHotspotsTool;
 use CoquiBot\Toolkits\Git\Tool\GitDiffTool;
+use CoquiBot\Toolkits\Git\Tool\GitBugHotspotsTool;
 use CoquiBot\Toolkits\Git\Tool\GitInitTool;
 use CoquiBot\Toolkits\Git\Tool\GitLogTool;
 use CoquiBot\Toolkits\Git\Tool\GitMergeTool;
@@ -19,6 +24,7 @@ use CoquiBot\Toolkits\Git\Tool\GitRemoteTool;
 use CoquiBot\Toolkits\Git\Tool\GitStageTool;
 use CoquiBot\Toolkits\Git\Tool\GitStatusTool;
 use CoquiBot\Toolkits\Git\Tool\GitTagTool;
+use CoquiBot\Toolkits\Git\Tool\GitVelocityTrendTool;
 
 /**
  * Git repository management toolkit for Coqui.
@@ -51,6 +57,7 @@ final class GitToolkit implements ToolkitInterface
     public function tools(): array
     {
         $runner = new GitRunner(defaultRepoPath: $this->workspacePath);
+        $analysis = new GitAnalysisService($runner);
 
         return [
             (new GitInitTool($runner))->build(),
@@ -66,6 +73,11 @@ final class GitToolkit implements ToolkitInterface
             (new GitPushTool($runner))->build(),
             (new GitPullTool($runner))->build(),
             (new GitMergeTool($runner))->build(),
+            (new GitChurnHotspotsTool($analysis))->build(),
+            (new GitContributorRankingTool($analysis))->build(),
+            (new GitBugHotspotsTool($analysis))->build(),
+            (new GitVelocityTrendTool($analysis))->build(),
+            (new GitCrisisDetectionTool($analysis))->build(),
         ];
     }
 
@@ -89,6 +101,11 @@ final class GitToolkit implements ToolkitInterface
             | Push to remote | `git_push` | Sends local commits upstream |
             | Pull from remote | `git_pull` | Fetches and integrates remote changes |
             | Merge branches | `git_merge` | Merge or abort in-progress merge |
+            | Find churn hotspots | `git_churn_hotspots` | Rank files by change frequency |
+            | Rank contributors | `git_contributor_ranking` | Detect bus-factor and maintainer drift |
+            | Find bug hotspots | `git_bug_hotspots` | Rank files that appear in fix-heavy commits |
+            | Track repo velocity | `git_velocity_trend` | Show whether activity is steady or declining |
+            | Detect firefighting | `git_crisis_detection` | Find revert, hotfix, rollback, and emergency patterns |
 
             ## Destructive Operation Confirmation
 
@@ -121,6 +138,13 @@ final class GitToolkit implements ToolkitInterface
 
             ## Workflow Patterns
 
+            ### Triage A New Repository Before Reading Code
+            1. `git_churn_hotspots(period: "1-year")` — see what changes the most
+            2. `git_bug_hotspots(period: "1-year")` — find files that keep getting patched
+            3. `git_contributor_ranking(period: "all-time")` — identify bus-factor and maintainer drift
+            4. `git_velocity_trend(period: "all-time", granularity: "month")` — check whether the project is accelerating or stalling
+            5. `git_crisis_detection(period: "1-year")` — look for revert and hotfix pressure
+
             ### Feature Branch Flow
             1. `git_branch(action: "create", name: "feature/my-change")`
             2. `git_checkout(target: "feature/my-change")`
@@ -141,6 +165,7 @@ final class GitToolkit implements ToolkitInterface
             3. `git_diff(scope: "commits", ref1: "main", ref2: "feature/x")` — branch comparison
 
             ## Best Practices
+            - Before reading unfamiliar code, use the analysis tools to identify churn, defects, ownership concentration, and release instability
             - Always check `git_status` before staging or committing
             - Use `git_diff(scope: "staged")` to review exactly what will be committed
             - Write clear, conventional commit messages (feat:, fix:, docs:, refactor:, test:, chore:)

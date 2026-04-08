@@ -1,6 +1,6 @@
 {
     "name": "coquibot/coqui-toolkit-git",
-    "description": "Git repository management toolkit for Coqui — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log",
+    "description": "Git repository management and repository triage toolkit for Coqui — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log, and audit analytics",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -49,7 +49,8 @@
             "toolkits": [
                 "CoquiBot\\Toolkits\\Git\\GitToolkit"
             ],
-            "description": "Git repository management — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log",
+            "description": "Git repository management and discovery analytics — status, staging, commits, branches, tags, remotes, push/pull, merge, diff, log, and pre-code-reading audits",
+            "skills": "skills",
             "credentials": {
                 "GIT_BOT_NAME": {
                     "description": "Git author/committer name for bot commits (e.g. 'Coqui Bot'). Optional — omit to use the repo's default git config.",

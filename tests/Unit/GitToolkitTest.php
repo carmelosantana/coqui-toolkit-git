@@ -12,10 +12,10 @@ test('toolkit implements ToolkitInterface', function () {
     expect($toolkit)->toBeInstanceOf(ToolkitInterface::class);
 });
 
-test('tools returns all 13 tools', function () {
+test('tools returns all 18 tools', function () {
     $toolkit = new GitToolkit();
 
-    expect($toolkit->tools())->toHaveCount(13);
+    expect($toolkit->tools())->toHaveCount(18);
 });
 
 test('each tool implements ToolInterface', function () {
@@ -82,6 +82,19 @@ test('guidelines mention destructive operation confirmation', function () {
         ->toContain('action: "delete"');
 });
 
+    test('guidelines mention repository triage analysis tools', function () {
+        $toolkit = new GitToolkit();
+        $guidelines = $toolkit->guidelines();
+
+        expect($guidelines)
+        ->toContain('Triage A New Repository Before Reading Code')
+        ->toContain('git_churn_hotspots')
+        ->toContain('git_bug_hotspots')
+        ->toContain('git_contributor_ranking')
+        ->toContain('git_velocity_trend')
+        ->toContain('git_crisis_detection');
+    });
+
 test('guidelines mention bot identity', function () {
     $toolkit = new GitToolkit();
     $guidelines = $toolkit->guidelines();
@@ -114,11 +127,18 @@ test('composer.json declares optional credentials', function () {
     expect($credentials['GIT_BOT_EMAIL']['optional'])->toBeTrue();
 });
 
+test('composer.json declares bundled skills directory', function () {
+    $composerPath = dirname(__DIR__, 2) . '/composer.json';
+    $composer = json_decode(file_get_contents($composerPath), true);
+
+    expect($composer['extra']['php-agents']['skills'] ?? null)->toBe('skills');
+});
+
 test('fromEnv creates instance', function () {
     $toolkit = GitToolkit::fromEnv();
 
     expect($toolkit)->toBeInstanceOf(GitToolkit::class);
-    expect($toolkit->tools())->toHaveCount(13);
+    expect($toolkit->tools())->toHaveCount(18);
 });
 
 test('expected tool names are present', function () {
@@ -139,6 +159,11 @@ test('expected tool names are present', function () {
         'git_push',
         'git_pull',
         'git_merge',
+        'git_churn_hotspots',
+        'git_contributor_ranking',
+        'git_bug_hotspots',
+        'git_velocity_trend',
+        'git_crisis_detection',
     ];
 
     foreach ($expected as $name) {
