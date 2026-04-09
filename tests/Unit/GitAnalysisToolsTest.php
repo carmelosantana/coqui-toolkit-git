@@ -7,6 +7,17 @@ use CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use CoquiBot\Toolkits\Git\GitToolkit;
 
 /**
+ * @return array<string, mixed>
+ */
+function decodeAnalysisResult(string $content): array
+{
+    /** @var array<string, mixed> $decoded */
+    $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+
+    return $decoded;
+}
+
+/**
  * Integration tests for the higher-level repository analysis tools.
  */
 
@@ -108,8 +119,11 @@ test('git_churn_hotspots ranks the most changed files first', function () {
     $result = $this->tools['git_churn_hotspots']->execute(['period' => '1-year', 'limit' => 5]);
 
     expect($result->status)->toBe(ToolResultStatus::Success);
-    expect($result->content)->toContain('src/Hotspot.php');
-    expect(strpos($result->content, 'src/Hotspot.php'))->toBeLessThan(strpos($result->content, 'src/Stable.php'));
+    $payload = decodeAnalysisResult($result->content);
+
+    expect($payload['analysis'])->toBe('churn_hotspots');
+    expect($payload['items'][0]['file'])->toBe('src/Hotspot.php');
+    expect($payload['items'][0]['change_count'])->toBeGreaterThan($payload['items'][1]['change_count']);
 });
 
 test('git_contributor_ranking flags bus factor and maintainer drift', function () {
@@ -121,8 +135,11 @@ test('git_contributor_ranking flags bus factor and maintainer drift', function (
     $result = $this->tools['git_contributor_ranking']->execute(['period' => 'all-time']);
 
     expect($result->status)->toBe(ToolResultStatus::Success);
-    expect($result->content)->toContain('Bus factor warning');
-    expect($result->content)->toContain('does not appear in the last 6 months');
+    $payload = decodeAnalysisResult($result->content);
+
+    expect($payload['analysis'])->toBe('contributor_ranking');
+    expect($payload['bus_factor']['warning'])->toBeTrue();
+    expect($payload['maintainer_drift']['missing_from_recent_window'])->toBeTrue();
 });
 
 test('git_bug_hotspots reports overlap with churn hotspots', function () {
@@ -134,8 +151,11 @@ test('git_bug_hotspots reports overlap with churn hotspots', function () {
     $result = $this->tools['git_bug_hotspots']->execute(['period' => '1-year']);
 
     expect($result->status)->toBe(ToolResultStatus::Success);
-    expect($result->content)->toContain('Overlap with churn hotspots');
-    expect($result->content)->toContain('src/Risky.php');
+    $payload = decodeAnalysisResult($result->content);
+
+    expect($payload['analysis'])->toBe('bug_hotspots');
+    expect($payload['risk_level'])->toBe('high');
+    expect($payload['overlap_with_churn'][0]['file'])->toBe('src/Risky.php');
 });
 
 test('git_velocity_trend detects declining activity', function () {
@@ -150,7 +170,10 @@ test('git_velocity_trend detects declining activity', function () {
     ]);
 
     expect($result->status)->toBe(ToolResultStatus::Success);
-    expect($result->content)->toContain('Trend: declining');
+    $payload = decodeAnalysisResult($result->content);
+
+    expect($payload['analysis'])->toBe('velocity_trend');
+    expect($payload['trend'])->toBe('declining');
 });
 
 test('git_crisis_detection finds revert and hotfix patterns', function () {
@@ -161,7 +184,33 @@ test('git_crisis_detection finds revert and hotfix patterns', function () {
     $result = $this->tools['git_crisis_detection']->execute(['period' => '1-year']);
 
     expect($result->status)->toBe(ToolResultStatus::Success);
-    expect($result->content)->toContain('Assessment:');
-    expect($result->content)->toContain('revert');
-    expect($result->content)->toContain('hotfix');
+    $payload = decodeAnalysisResult($result->content);
+
+    expect($payload['analysis'])->toBe('crisis_detection');
+    expect($payload['assessment'])->not->toBe('STABLE');
+    expect($payload['events'][0]['type'])->toBe('hotfix');
+    expect($payload['events'][1]['type'])->toBe('revert');
+});
+
+test('git_repo_triage returns one combined machine-readable report', function () {
+    commitAnalysisFile($this->tmpDir, 'src/Risky.php', '<?php echo 1;', 'feat: add risky area', '2025-06-01T12:00:00', 'Alice', 'alice@example.com');
+    commitAnalysisFile($this->tmpDir, 'src/Risky.php', '<?php echo 2;', 'fix: risky regression', '2025-07-01T12:00:00', 'Alice', 'alice@example.com');
+    commitAnalysisFile($this->tmpDir, 'src/App.php', '<?php echo 3;', 'hotfix: restore login', '2026-02-01T12:00:00', 'Bob', 'bob@example.com');
+
+    $result = $this->tools['git_repo_triage']->execute([]);
+
+    expect($result->status)->toBe(ToolResultStatus::Success);
+
+    $payload = decodeAnalysisResult($result->content);
+
+    expect($payload['analysis'])->toBe('repo_triage');
+    expect($payload)->toHaveKeys([
+        'churn_hotspots',
+        'contributor_ranking',
+        'bug_hotspots',
+        'velocity_trend',
+        'crisis_detection',
+        'priority_signals',
+    ]);
+    expect($payload['priority_signals']['priority_files'])->toContain('src/Risky.php');
 });

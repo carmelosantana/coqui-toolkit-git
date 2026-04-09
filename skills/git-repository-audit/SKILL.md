@@ -12,15 +12,18 @@ metadata:
 
 Use this skill when the goal is to understand where a repository hurts before editing or even reading the code in depth.
 
+The repository analysis tools return compact JSON. Read the fields directly and only translate them into prose when the user wants an explanation.
+
 ## Discovery Workflow
 
 Start with the high-level repository signals:
 
-1. `git_churn_hotspots(period: "1-year")` to find the files that absorb the most change.
-2. `git_bug_hotspots(period: "1-year")` to find the files that repeatedly appear in fix-heavy commits.
-3. `git_contributor_ranking(period: "all-time")` to identify ownership concentration and maintainer drift.
-4. `git_velocity_trend(period: "all-time", granularity: "month")` to determine whether delivery is steady, accelerating, or fading.
-5. `git_crisis_detection(period: "1-year")` to detect reverts, hotfixes, and rollback-heavy release pressure.
+1. `git_repo_triage()` if you want the full machine-readable audit in one tool call.
+2. `git_churn_hotspots(period: "1-year")` to find the files that absorb the most change.
+3. `git_bug_hotspots(period: "1-year")` to find the files that repeatedly appear in fix-heavy commits.
+4. `git_contributor_ranking(period: "all-time")` to identify ownership concentration and maintainer drift.
+5. `git_velocity_trend(period: "all-time", granularity: "month")` to determine whether delivery is steady, accelerating, or fading.
+6. `git_crisis_detection(period: "1-year")` to detect reverts, hotfixes, and rollback-heavy release pressure.
 
 ## How To Interpret The Signals
 

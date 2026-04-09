@@ -20,6 +20,7 @@ use CoquiBot\Toolkits\Git\Tool\GitLogTool;
 use CoquiBot\Toolkits\Git\Tool\GitMergeTool;
 use CoquiBot\Toolkits\Git\Tool\GitPullTool;
 use CoquiBot\Toolkits\Git\Tool\GitPushTool;
+use CoquiBot\Toolkits\Git\Tool\GitRepoTriageTool;
 use CoquiBot\Toolkits\Git\Tool\GitRemoteTool;
 use CoquiBot\Toolkits\Git\Tool\GitStageTool;
 use CoquiBot\Toolkits\Git\Tool\GitStatusTool;
@@ -78,6 +79,7 @@ final class GitToolkit implements ToolkitInterface
             (new GitBugHotspotsTool($analysis))->build(),
             (new GitVelocityTrendTool($analysis))->build(),
             (new GitCrisisDetectionTool($analysis))->build(),
+            (new GitRepoTriageTool($analysis))->build(),
         ];
     }
 
@@ -106,6 +108,7 @@ final class GitToolkit implements ToolkitInterface
             | Find bug hotspots | `git_bug_hotspots` | Rank files that appear in fix-heavy commits |
             | Track repo velocity | `git_velocity_trend` | Show whether activity is steady or declining |
             | Detect firefighting | `git_crisis_detection` | Find revert, hotfix, rollback, and emergency patterns |
+            | Run full repo triage | `git_repo_triage` | Return one compact JSON report with all audit signals |
 
             ## Destructive Operation Confirmation
 
@@ -139,11 +142,8 @@ final class GitToolkit implements ToolkitInterface
             ## Workflow Patterns
 
             ### Triage A New Repository Before Reading Code
-            1. `git_churn_hotspots(period: "1-year")` — see what changes the most
-            2. `git_bug_hotspots(period: "1-year")` — find files that keep getting patched
-            3. `git_contributor_ranking(period: "all-time")` — identify bus-factor and maintainer drift
-            4. `git_velocity_trend(period: "all-time", granularity: "month")` — check whether the project is accelerating or stalling
-            5. `git_crisis_detection(period: "1-year")` — look for revert and hotfix pressure
+            1. `git_repo_triage()` — get the complete machine-readable audit in one call
+            2. Or call `git_churn_hotspots`, `git_bug_hotspots`, `git_contributor_ranking`, `git_velocity_trend`, and `git_crisis_detection` separately if you want narrower queries
 
             ### Feature Branch Flow
             1. `git_branch(action: "create", name: "feature/my-change")`
@@ -165,6 +165,7 @@ final class GitToolkit implements ToolkitInterface
             3. `git_diff(scope: "commits", ref1: "main", ref2: "feature/x")` — branch comparison
 
             ## Best Practices
+            - Analysis tools return compact JSON for machine consumption. Summarize the data for the user only when explanation is useful.
             - Before reading unfamiliar code, use the analysis tools to identify churn, defects, ownership concentration, and release instability
             - Always check `git_status` before staging or committing
             - Use `git_diff(scope: "staged")` to review exactly what will be committed

@@ -12,10 +12,10 @@ test('toolkit implements ToolkitInterface', function () {
     expect($toolkit)->toBeInstanceOf(ToolkitInterface::class);
 });
 
-test('tools returns all 18 tools', function () {
+test('tools returns all 19 tools', function () {
     $toolkit = new GitToolkit();
 
-    expect($toolkit->tools())->toHaveCount(18);
+    expect($toolkit->tools())->toHaveCount(19);
 });
 
 test('each tool implements ToolInterface', function () {
@@ -92,7 +92,8 @@ test('guidelines mention destructive operation confirmation', function () {
         ->toContain('git_bug_hotspots')
         ->toContain('git_contributor_ranking')
         ->toContain('git_velocity_trend')
-        ->toContain('git_crisis_detection');
+        ->toContain('git_crisis_detection')
+        ->toContain('git_repo_triage');
     });
 
 test('guidelines mention bot identity', function () {
@@ -138,7 +139,7 @@ test('fromEnv creates instance', function () {
     $toolkit = GitToolkit::fromEnv();
 
     expect($toolkit)->toBeInstanceOf(GitToolkit::class);
-    expect($toolkit->tools())->toHaveCount(18);
+    expect($toolkit->tools())->toHaveCount(19);
 });
 
 test('expected tool names are present', function () {
@@ -164,6 +165,7 @@ test('expected tool names are present', function () {
         'git_bug_hotspots',
         'git_velocity_trend',
         'git_crisis_detection',
+        'git_repo_triage',
     ];
 
     foreach ($expected as $name) {

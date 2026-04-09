@@ -70,29 +70,12 @@ final readonly class GitAnalysisService
         $limit = $this->readLimit($args, 'limit', 20, 1, 50);
         $path = $this->readPath($args);
 
-        $counts = $this->collectFileCounts($period, $path);
-        if ($counts['error'] !== null) {
-            return ToolResult::error($counts['error']);
+        $report = $this->buildChurnHotspotsReport($period, $limit, $path);
+        if ($report['error'] !== null) {
+            return ToolResult::error($report['error']);
         }
 
-        if ($counts['counts'] === []) {
-            return ToolResult::success(
-                sprintf('No file churn found for %s. The repository may have no commits in that period.', $this->describePeriod($period)),
-            );
-        }
-
-        $ranked = $this->rankCounts($counts['counts'], $limit);
-        $topFile = $ranked[0]['label'];
-
-        $lines = [
-            sprintf('Git churn hotspots for %s', $this->describePeriod($period)),
-            '',
-            $this->renderTable(['#', 'File', 'Changes'], $this->rankedRows($ranked, 'count')),
-            '',
-            sprintf('Interpretation: %s is the hottest file in this window. High churn often signals active work, but high churn paired with bug-fix traffic usually marks the riskiest code to touch first.', $topFile),
-        ];
-
-        return ToolResult::success(implode("\n", $lines));
+        return $this->successPayload($report['payload']);
     }
 
     /**
@@ -106,72 +89,12 @@ final readonly class GitAnalysisService
         $ignoreMerges = $mergeStrategy !== 'count-merges';
         $path = $this->readPath($args);
 
-        $selected = $this->collectContributors($period, $ignoreMerges, $path);
-        if ($selected['error'] !== null) {
-            return ToolResult::error($selected['error']);
+        $report = $this->buildContributorRankingReport($period, $limit, $ignoreMerges, $path);
+        if ($report['error'] !== null) {
+            return ToolResult::error($report['error']);
         }
 
-        if ($selected['contributors'] === []) {
-            return ToolResult::success(
-                sprintf('No contributor activity found for %s.', $this->describePeriod($period)),
-            );
-        }
-
-        $overall = $this->collectContributors('all-time', $ignoreMerges, $path);
-        if ($overall['error'] !== null) {
-            return ToolResult::error($overall['error']);
-        }
-
-        $recent = $this->collectContributors('6-months', $ignoreMerges, $path);
-        if ($recent['error'] !== null) {
-            return ToolResult::error($recent['error']);
-        }
-
-        $display = array_slice($selected['contributors'], 0, $limit);
-        $totalCommits = array_sum(array_column($selected['contributors'], 'commits'));
-        $topContributor = $selected['contributors'][0];
-        $topPercent = $totalCommits > 0 ? ($topContributor['commits'] / $totalCommits) * 100 : 0.0;
-        $allTimeTop = $overall['contributors'][0] ?? null;
-        $recentNames = array_map(
-            static fn(array $contributor): string => strtolower($contributor['name']),
-            $recent['contributors'],
-        );
-
-        $inactivityWarning = null;
-        if ($allTimeTop !== null && !in_array(strtolower($allTimeTop['name']), $recentNames, true)) {
-            $inactivityWarning = sprintf(
-                '%s is the top all-time contributor but does not appear in the last 6 months. That is a maintenance continuity risk if the code still depends on their context.',
-                $allTimeTop['name'],
-            );
-        }
-
-        $busFactor = $topPercent >= 60
-            ? sprintf('Bus factor warning: %s accounts for %.1f%% of the commits in this window.', $topContributor['name'], $topPercent)
-            : sprintf('Contributor distribution looks healthier: %s leads with %.1f%% of commits in this window.', $topContributor['name'], $topPercent);
-
-        $lines = [
-            sprintf('Contributor ranking for %s', $this->describePeriod($period)),
-            '',
-            $this->renderTable(
-                ['#', 'Contributor', 'Email', 'Commits'],
-                array_map(
-                    static fn(int $index, array $contributor): array => [
-                        (string) ($index + 1),
-                        $contributor['name'],
-                        $contributor['email'] !== '' ? $contributor['email'] : '—',
-                        (string) $contributor['commits'],
-                    ],
-                    array_keys($display),
-                    $display,
-                ),
-            ),
-            '',
-            $busFactor,
-            $inactivityWarning ?? 'Recent contributor activity still includes the dominant historical maintainers.',
-            'Caveat: squash-merge-heavy workflows can distort authorship toward whoever merged the pull requests.',
-        ];
-
-        return ToolResult::success(implode("\n", $lines));
+        return $this->successPayload($report['payload']);
     }
 
     /**
@@ -188,78 +111,12 @@ final readonly class GitAnalysisService
             return ToolResult::error('The "keywords" parameter cannot be empty.');
         }
 
-        $bugCounts = $this->collectFileCounts(
-            $period,
-            $path,
-            [
-                '--regexp-ignore-case',
-                '--extended-regexp',
-                '--grep=' . $keywords,
-            ],
-        );
-
-        if ($bugCounts['error'] !== null) {
-            return ToolResult::error($bugCounts['error']);
+        $report = $this->buildBugHotspotsReport($period, $limit, $keywords, $path);
+        if ($report['error'] !== null) {
+            return ToolResult::error($report['error']);
         }
 
-        if ($bugCounts['counts'] === []) {
-            return ToolResult::success(
-                sprintf(
-                    'No bug hotspot signals found for %s using keywords %s.',
-                    $this->describePeriod($period),
-                    $keywords,
-                ),
-            );
-        }
-
-        $churnCounts = $this->collectFileCounts($period, $path);
-        if ($churnCounts['error'] !== null) {
-            return ToolResult::error($churnCounts['error']);
-        }
-
-        $ranked = $this->rankCounts($bugCounts['counts'], $limit);
-        $churnRanked = $this->rankCounts($churnCounts['counts'], $limit);
-        $churnMap = [];
-        foreach ($churnRanked as $item) {
-            $churnMap[$item['label']] = $item['count'];
-        }
-
-        $overlapRows = [];
-        foreach ($ranked as $item) {
-            if (!isset($churnMap[$item['label']])) {
-                continue;
-            }
-
-            $overlapRows[] = [
-                $item['label'],
-                (string) $item['count'],
-                (string) $churnMap[$item['label']],
-            ];
-        }
-
-        $riskMessage = match (count($overlapRows)) {
-            0 => 'Risk assessment: bug-fix churn does not overlap with the highest-churn files in this window, so the repo may have clearer hotspots separation.',
-            1 => sprintf('Risk assessment: %s is both a churn hotspot and a bug hotspot. Start your code reading there.', $overlapRows[0][0]),
-            default => sprintf('Risk assessment: %s files overlap between churn and bug hotspots. Those are the most failure-prone areas to inspect first.', count($overlapRows)),
-        };
-
-        $lines = [
-            sprintf('Bug hotspots for %s', $this->describePeriod($period)),
-            '',
-            $this->renderTable(['#', 'File', 'Bug-fix commits'], $this->rankedRows($ranked, 'count')),
-            '',
-        ];
-
-        if ($overlapRows !== []) {
-            $lines[] = 'Overlap with churn hotspots';
-            $lines[] = '';
-            $lines[] = $this->renderTable(['File', 'Bug-fix commits', 'Churn events'], $overlapRows);
-            $lines[] = '';
-        }
-
-        $lines[] = $riskMessage;
-
-        return ToolResult::success(implode("\n", $lines));
+        return $this->successPayload($report['payload']);
     }
 
     /**
@@ -275,45 +132,12 @@ final readonly class GitAnalysisService
             return ToolResult::error('The "granularity" parameter must be one of: month, quarter, year.');
         }
 
-        $dates = $this->collectCommitDates($period, $path);
-        if ($dates['error'] !== null) {
-            return ToolResult::error($dates['error']);
+        $report = $this->buildVelocityTrendReport($period, $granularity, $path);
+        if ($report['error'] !== null) {
+            return ToolResult::error($report['error']);
         }
 
-        if ($dates['dates'] === []) {
-            return ToolResult::success(
-                sprintf('No commit activity found for %s.', $this->describePeriod($period)),
-            );
-        }
-
-        $monthly = $this->buildMonthlySeries($dates['dates']);
-        $series = $this->aggregateSeries($monthly, $granularity);
-        $trend = $this->detectTrend(array_values($series));
-        $anomalies = $this->detectAnomalies($series);
-
-        $rows = [];
-        foreach ($series as $label => $count) {
-            $rows[] = [$label, (string) $count];
-        }
-
-        $lines = [
-            sprintf('Commit velocity trend for %s', $this->describePeriod($period)),
-            '',
-            $this->renderTable(['Period', 'Commits'], $rows),
-            '',
-            sprintf('Trend: %s', $trend),
-        ];
-
-        if ($anomalies !== []) {
-            $lines[] = 'Anomalies:';
-            foreach ($anomalies as $anomaly) {
-                $lines[] = '- ' . $anomaly;
-            }
-        } else {
-            $lines[] = 'Anomalies: none that exceed the reporting threshold.';
-        }
-
-        return ToolResult::success(implode("\n", $lines));
+        return $this->successPayload($report['payload']);
     }
 
     /**
@@ -333,47 +157,344 @@ final readonly class GitAnalysisService
             return ToolResult::error('The "keywords" parameter cannot be empty.');
         }
 
+        $report = $this->buildCrisisDetectionReport($period, $keywords, $path);
+        if ($report['error'] !== null) {
+            return ToolResult::error($report['error']);
+        }
+
+        return $this->successPayload($report['payload']);
+    }
+
+    /**
+     * @param array<string, mixed> $args
+     */
+    public function repoTriage(array $args): ToolResult
+    {
+        $hotspotPeriod = $this->readPeriod($args, 'hotspot_period', self::HOTSPOT_PERIODS, '1-year');
+        $contributorPeriod = $this->readPeriod($args, 'contributor_period', self::CONTRIBUTOR_PERIODS, 'all-time');
+        $velocityPeriod = $this->readPeriod($args, 'velocity_period', self::VELOCITY_PERIODS, 'all-time');
+        $velocityGranularity = trim((string) ($args['velocity_granularity'] ?? 'month'));
+        $crisisPeriod = $this->readPeriod($args, 'crisis_period', self::HOTSPOT_PERIODS, '1-year');
+        $limit = $this->readLimit($args, 'limit', 20, 1, 50);
+        $bugKeywords = trim((string) ($args['bug_keywords'] ?? 'fix|bug|broken'));
+        $crisisKeywords = trim((string) ($args['crisis_keywords'] ?? 'revert|hotfix|emergency|rollback'));
+        $path = $this->readPath($args);
+
+        if (!in_array($velocityGranularity, ['month', 'quarter', 'year'], true)) {
+            return ToolResult::error('The "velocity_granularity" parameter must be one of: month, quarter, year.');
+        }
+
+        if (!isset(self::CRISIS_PERIOD_MONTHS[$crisisPeriod])) {
+            return ToolResult::error('The "crisis_period" parameter must be one of: 1-month, 3-months, 6-months, 1-year.');
+        }
+
+        if ($bugKeywords === '' || $crisisKeywords === '') {
+            return ToolResult::error('The "bug_keywords" and "crisis_keywords" parameters cannot be empty.');
+        }
+
+        $churn = $this->buildChurnHotspotsReport($hotspotPeriod, $limit, $path);
+        if ($churn['error'] !== null) {
+            return ToolResult::error($churn['error']);
+        }
+
+        $contributors = $this->buildContributorRankingReport($contributorPeriod, $limit, true, $path);
+        if ($contributors['error'] !== null) {
+            return ToolResult::error($contributors['error']);
+        }
+
+        $bug = $this->buildBugHotspotsReport($hotspotPeriod, $limit, $bugKeywords, $path);
+        if ($bug['error'] !== null) {
+            return ToolResult::error($bug['error']);
+        }
+
+        $velocity = $this->buildVelocityTrendReport($velocityPeriod, $velocityGranularity, $path);
+        if ($velocity['error'] !== null) {
+            return ToolResult::error($velocity['error']);
+        }
+
+        $crisis = $this->buildCrisisDetectionReport($crisisPeriod, $crisisKeywords, $path);
+        if ($crisis['error'] !== null) {
+            return ToolResult::error($crisis['error']);
+        }
+
+        $payload = [
+            'analysis' => 'repo_triage',
+            'status' => 'ok',
+            'repository_path' => $path,
+            'generated_at' => (new DateTimeImmutable())->format(DATE_ATOM),
+            'inputs' => [
+                'hotspot_period' => $hotspotPeriod,
+                'contributor_period' => $contributorPeriod,
+                'velocity_period' => $velocityPeriod,
+                'velocity_granularity' => $velocityGranularity,
+                'crisis_period' => $crisisPeriod,
+                'limit' => $limit,
+                'bug_keywords' => $bugKeywords,
+                'crisis_keywords' => $crisisKeywords,
+            ],
+            'churn_hotspots' => $churn['payload'],
+            'contributor_ranking' => $contributors['payload'],
+            'bug_hotspots' => $bug['payload'],
+            'velocity_trend' => $velocity['payload'],
+            'crisis_detection' => $crisis['payload'],
+            'priority_signals' => [
+                'priority_files' => $this->derivePriorityFiles($churn['payload'], $bug['payload']),
+                'bus_factor_warning' => (bool) ($contributors['payload']['bus_factor']['warning'] ?? false),
+                'maintainer_drift' => (bool) ($contributors['payload']['maintainer_drift']['missing_from_recent_window'] ?? false),
+                'delivery_risk' => $this->deriveDeliveryRisk($velocity['payload'], $crisis['payload']),
+            ],
+        ];
+
+        return $this->successPayload($payload);
+    }
+
+    /**
+     * @return array{payload: array<string, mixed>, error: ?string}
+     */
+    private function buildChurnHotspotsReport(string $period, int $limit, string $path): array
+    {
+        $counts = $this->collectFileCounts($period, $path);
+        if ($counts['error'] !== null) {
+            return ['payload' => [], 'error' => $counts['error']];
+        }
+
+        $ranked = $this->rankCounts($counts['counts'], $limit);
+
+        return [
+            'payload' => [
+                'analysis' => 'churn_hotspots',
+                'status' => $ranked === [] ? 'empty' : 'ok',
+                'repository_path' => $path,
+                'period' => $period,
+                'limit' => $limit,
+                'top_file' => $ranked[0]['label'] ?? null,
+                'items' => array_map(
+                    static fn(array $item): array => [
+                        'file' => $item['label'],
+                        'change_count' => $item['count'],
+                    ],
+                    $ranked,
+                ),
+            ],
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{payload: array<string, mixed>, error: ?string}
+     */
+    private function buildContributorRankingReport(string $period, int $limit, bool $ignoreMerges, string $path): array
+    {
+        $selected = $this->collectContributors($period, $ignoreMerges, $path);
+        if ($selected['error'] !== null) {
+            return ['payload' => [], 'error' => $selected['error']];
+        }
+
+        $overall = $this->collectContributors('all-time', $ignoreMerges, $path);
+        if ($overall['error'] !== null) {
+            return ['payload' => [], 'error' => $overall['error']];
+        }
+
+        $recent = $this->collectContributors('6-months', $ignoreMerges, $path);
+        if ($recent['error'] !== null) {
+            return ['payload' => [], 'error' => $recent['error']];
+        }
+
+        $display = array_slice($selected['contributors'], 0, $limit);
+        $totalCommits = array_sum(array_column($selected['contributors'], 'commits'));
+        $topContributor = $selected['contributors'][0] ?? null;
+        $topPercent = $topContributor !== null && $totalCommits > 0
+            ? round(($topContributor['commits'] / $totalCommits) * 100, 2)
+            : 0.0;
+
+        $allTimeTop = $overall['contributors'][0] ?? null;
+        $recentNames = array_map(
+            static fn(array $contributor): string => strtolower($contributor['name']),
+            $recent['contributors'],
+        );
+
+        $missingFromRecentWindow = $allTimeTop !== null
+            && !in_array(strtolower($allTimeTop['name']), $recentNames, true);
+
+        return [
+            'payload' => [
+                'analysis' => 'contributor_ranking',
+                'status' => $display === [] ? 'empty' : 'ok',
+                'repository_path' => $path,
+                'period' => $period,
+                'limit' => $limit,
+                'merge_strategy' => $ignoreMerges ? 'ignore-merges' : 'count-merges',
+                'contributors' => array_map(
+                    static fn(array $contributor): array => [
+                        'name' => $contributor['name'],
+                        'email' => $contributor['email'],
+                        'commit_count' => $contributor['commits'],
+                    ],
+                    $display,
+                ),
+                'bus_factor' => [
+                    'top_contributor' => $topContributor['name'] ?? null,
+                    'top_percent' => $topPercent,
+                    'warning' => $topPercent >= 60.0,
+                ],
+                'maintainer_drift' => [
+                    'recent_window' => '6-months',
+                    'top_all_time_contributor' => $allTimeTop['name'] ?? null,
+                    'missing_from_recent_window' => $missingFromRecentWindow,
+                ],
+            ],
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{payload: array<string, mixed>, error: ?string}
+     */
+    private function buildBugHotspotsReport(string $period, int $limit, string $keywords, string $path): array
+    {
+        $bugCounts = $this->collectFileCounts(
+            $period,
+            $path,
+            [
+                '--regexp-ignore-case',
+                '--extended-regexp',
+                '--grep=' . $keywords,
+            ],
+        );
+        if ($bugCounts['error'] !== null) {
+            return ['payload' => [], 'error' => $bugCounts['error']];
+        }
+
+        $churnCounts = $this->collectFileCounts($period, $path);
+        if ($churnCounts['error'] !== null) {
+            return ['payload' => [], 'error' => $churnCounts['error']];
+        }
+
+        $ranked = $this->rankCounts($bugCounts['counts'], $limit);
+        $churnRanked = $this->rankCounts($churnCounts['counts'], $limit);
+        $churnMap = [];
+        foreach ($churnRanked as $item) {
+            $churnMap[$item['label']] = $item['count'];
+        }
+
+        $overlap = [];
+        foreach ($ranked as $item) {
+            if (!isset($churnMap[$item['label']])) {
+                continue;
+            }
+
+            $overlap[] = [
+                'file' => $item['label'],
+                'bug_fix_count' => $item['count'],
+                'change_count' => $churnMap[$item['label']],
+            ];
+        }
+
+        return [
+            'payload' => [
+                'analysis' => 'bug_hotspots',
+                'status' => $ranked === [] ? 'empty' : 'ok',
+                'repository_path' => $path,
+                'period' => $period,
+                'limit' => $limit,
+                'keywords' => $keywords,
+                'top_file' => $ranked[0]['label'] ?? null,
+                'items' => array_map(
+                    static fn(array $item): array => [
+                        'file' => $item['label'],
+                        'bug_fix_count' => $item['count'],
+                    ],
+                    $ranked,
+                ),
+                'overlap_with_churn' => $overlap,
+                'risk_level' => $overlap !== [] ? 'high' : ($ranked !== [] ? 'medium' : 'low'),
+            ],
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{payload: array<string, mixed>, error: ?string}
+     */
+    private function buildVelocityTrendReport(string $period, string $granularity, string $path): array
+    {
+        $dates = $this->collectCommitDates($period, $path);
+        if ($dates['error'] !== null) {
+            return ['payload' => [], 'error' => $dates['error']];
+        }
+
+        if ($dates['dates'] === []) {
+            return [
+                'payload' => [
+                    'analysis' => 'velocity_trend',
+                    'status' => 'empty',
+                    'repository_path' => $path,
+                    'period' => $period,
+                    'granularity' => $granularity,
+                    'trend' => 'insufficient_data',
+                    'series' => [],
+                    'anomalies' => [],
+                ],
+                'error' => null,
+            ];
+        }
+
+        $monthly = $this->buildMonthlySeries($dates['dates']);
+        $series = $this->aggregateSeries($monthly, $granularity);
+
+        return [
+            'payload' => [
+                'analysis' => 'velocity_trend',
+                'status' => 'ok',
+                'repository_path' => $path,
+                'period' => $period,
+                'granularity' => $granularity,
+                'trend' => $this->detectTrend(array_values($series)),
+                'series' => array_map(
+                    static fn(string $label, int $count): array => [
+                        'period' => $label,
+                        'commit_count' => $count,
+                    ],
+                    array_keys($series),
+                    array_values($series),
+                ),
+                'anomalies' => $this->detectAnomalies($series),
+            ],
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{payload: array<string, mixed>, error: ?string}
+     */
+    private function buildCrisisDetectionReport(string $period, string $keywords, string $path): array
+    {
         $events = $this->collectCrisisEvents($period, $keywords, $path);
         if ($events['error'] !== null) {
-            return ToolResult::error($events['error']);
+            return ['payload' => [], 'error' => $events['error']];
         }
 
         $months = self::CRISIS_PERIOD_MONTHS[$period];
         $count = count($events['events']);
-        $eventsPerMonth = $count / $months;
+        $eventsPerMonth = round($count / $months, 2);
         $assessment = $count === 0
             ? 'STABLE'
             : ($eventsPerMonth <= 0.75 ? 'CAUTIOUS' : 'HIGH_ALERT');
 
-        if ($count === 0) {
-            return ToolResult::success(
-                sprintf(
-                    'Crisis detection for %s: STABLE. No revert, hotfix, emergency, or rollback commits matched the configured keywords.',
-                    $this->describePeriod($period),
-                ),
-            );
-        }
-
-        $display = array_slice($events['events'], 0, 10);
-        $rows = array_map(
-            static fn(array $event): array => [$event['hash'], $event['date'], $event['type'], $event['message']],
-            $display,
-        );
-
-        $lines = [
-            sprintf('Crisis detection for %s', $this->describePeriod($period)),
-            '',
-            $this->renderTable(['Commit', 'Date', 'Type', 'Message'], $rows),
-            '',
-            sprintf('Assessment: %s (%.2f events/month across %d matched commit%s).', $assessment, $eventsPerMonth, $count, $count === 1 ? '' : 's'),
-            'Interpretation: repeated revert or hotfix traffic often points to deploy fear, weak test coverage, or rollback-heavy release practices.',
+        return [
+            'payload' => [
+                'analysis' => 'crisis_detection',
+                'status' => $count === 0 ? 'empty' : 'ok',
+                'repository_path' => $path,
+                'period' => $period,
+                'keywords' => $keywords,
+                'assessment' => $assessment,
+                'event_count' => $count,
+                'events_per_month' => $eventsPerMonth,
+                'events' => $events['events'],
+            ],
+            'error' => null,
         ];
-
-        if ($count > count($display)) {
-            $lines[] = sprintf('Showing the latest %d matched commits out of %d total.', count($display), $count);
-        }
-
-        return ToolResult::success(implode("\n", $lines));
     }
 
     /**
@@ -403,11 +524,6 @@ final readonly class GitAnalysisService
     private function readPath(array $args): string
     {
         return trim((string) ($args['path'] ?? ''));
-    }
-
-    private function describePeriod(string $period): string
-    {
-        return $period === 'all-time' ? 'all time' : $period;
     }
 
     /**
@@ -591,40 +707,6 @@ final readonly class GitAnalysisService
     }
 
     /**
-     * @param list<array{label: string, count: int}> $items
-     * @return list<array{0: string, 1: string, 2: string}>
-     */
-    private function rankedRows(array $items, string $countLabel): array
-    {
-        $rows = [];
-        foreach ($items as $index => $item) {
-            $rows[] = [
-                (string) ($index + 1),
-                $item['label'],
-                (string) $item[$countLabel],
-            ];
-        }
-
-        return $rows;
-    }
-
-    /**
-    * @param list<string> $headers
-    * @param list<array<int, string>> $rows
-     */
-    private function renderTable(array $headers, array $rows): string
-    {
-        $headerLine = '| ' . implode(' | ', $headers) . ' |';
-        $separator = '| ' . implode(' | ', array_fill(0, count($headers), '---')) . ' |';
-        $body = array_map(
-            static fn(array $row): string => '| ' . implode(' | ', array_map(static fn(string $value): string => str_replace('|', '\\|', $value), $row)) . ' |',
-            $rows,
-        );
-
-        return implode("\n", array_merge([$headerLine, $separator], $body));
-    }
-
-    /**
      * @param list<string> $dates
      * @return array<string, int>
      */
@@ -690,7 +772,7 @@ final readonly class GitAnalysisService
     private function detectTrend(array $values): string
     {
         if (count($values) < 2) {
-            return 'insufficient data';
+            return 'insufficient_data';
         }
 
         $mean = array_sum($values) / count($values);
@@ -751,7 +833,77 @@ final readonly class GitAnalysisService
             }
         }
 
-        return 'matched-pattern';
+        return 'matched_pattern';
+    }
+
+    /**
+     * @param array<string, mixed> $churn
+     * @param array<string, mixed> $bug
+     * @return list<string>
+     */
+    private function derivePriorityFiles(array $churn, array $bug): array
+    {
+        $priority = [];
+
+        foreach (($bug['overlap_with_churn'] ?? []) as $item) {
+            if (!is_array($item) || !isset($item['file'])) {
+                continue;
+            }
+
+            $priority[] = (string) $item['file'];
+        }
+
+        if ($priority !== []) {
+            return array_values(array_unique($priority));
+        }
+
+        foreach (array_slice($churn['items'] ?? [], 0, 3) as $item) {
+            if (!is_array($item) || !isset($item['file'])) {
+                continue;
+            }
+
+            $priority[] = (string) $item['file'];
+        }
+
+        return array_values(array_unique($priority));
+    }
+
+    /**
+     * @param array<string, mixed> $velocity
+     * @param array<string, mixed> $crisis
+     */
+    private function deriveDeliveryRisk(array $velocity, array $crisis): string
+    {
+        $trend = (string) ($velocity['trend'] ?? 'insufficient_data');
+        $assessment = (string) ($crisis['assessment'] ?? 'STABLE');
+
+        if ($assessment === 'HIGH_ALERT' || ($trend === 'declining' && $assessment !== 'STABLE')) {
+            return 'high';
+        }
+
+        if ($assessment === 'CAUTIOUS' || $trend === 'declining' || $trend === 'volatile') {
+            return 'medium';
+        }
+
+        return 'low';
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function successPayload(array $payload): ToolResult
+    {
+        return ToolResult::success($this->encode($payload));
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function encode(array $payload): string
+    {
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return is_string($json) ? $json : '{}';
     }
 
     private function isEmptyHistory(GitResult $result): bool

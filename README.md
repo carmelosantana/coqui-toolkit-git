@@ -18,6 +18,8 @@ When installed alongside Coqui, the toolkit is **auto-discovered** via Composer'
 
 The toolkit also bundles a reusable skill, `git-repository-audit`, so Coqui can apply the discovery workflow automatically when the user asks to assess a repository before reading code.
 
+All repository analysis tools return compact JSON strings rather than prose-heavy summaries. That keeps token usage down and lets the bot decide whether to summarize, tabulate, compare, or feed the data into a larger workflow.
+
 ## Tools Provided
 
 ### `git_init`
@@ -227,6 +229,22 @@ Detect revert, hotfix, rollback, or emergency commit patterns that suggest firef
 | `keywords` | string | No | Regex used to match crisis-oriented commit messages (default: `revert|hotfix|emergency|rollback`) |
 | `path` | string | No | Repository path |
 
+### `git_repo_triage`
+
+Run the full audit workflow and return one machine-readable report containing churn, bug hotspots, contributor ranking, velocity, crisis detection, and derived priority signals.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `hotspot_period` | enum | No | `1-month`, `3-months`, `6-months`, `1-year`, or `all-time` |
+| `contributor_period` | enum | No | `all-time`, `1-year`, `6-months`, or `3-months` |
+| `velocity_period` | enum | No | `1-year`, `2-years`, or `all-time` |
+| `velocity_granularity` | enum | No | `month`, `quarter`, or `year` |
+| `crisis_period` | enum | No | `1-month`, `3-months`, `6-months`, or `1-year` |
+| `limit` | int | No | Max rows to include in each section (default: 20, max: 50) |
+| `bug_keywords` | string | No | Regex used to match bug-fix commits |
+| `crisis_keywords` | string | No | Regex used to match crisis-oriented commits |
+| `path` | string | No | Repository path |
+
 ## Usage Examples
 
 ### Feature Branch Workflow
@@ -260,14 +278,10 @@ git_diff(scope: "commits", ref1: "main", ref2: "feature/x", stat_only: true)
 ### Repository Triage Before Reading Code
 
 ```
-git_churn_hotspots(period: "1-year")
-git_bug_hotspots(period: "1-year")
-git_contributor_ranking(period: "all-time")
-git_velocity_trend(period: "all-time", granularity: "month")
-git_crisis_detection(period: "1-year")
+git_repo_triage()
 ```
 
-Use this flow to decide which files to inspect first, whether the codebase depends heavily on one maintainer, and whether the team is delivering confidently or firefighting.
+Use this when you want one compact JSON report. If you want to inspect a single signal in more detail, call the individual analysis tools instead.
 
 ### Tagging a Release
 
@@ -305,6 +319,7 @@ src/
     ├── GitBugHotspotsTool.php
     ├── GitVelocityTrendTool.php
     └── GitCrisisDetectionTool.php
+    └── GitRepoTriageTool.php
 
 skills/
 └── git-repository-audit/
